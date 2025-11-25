@@ -115,6 +115,13 @@
 </div>
 
 <script>
+  // تشخیص اینکه لینک برای Alibaba است یا 1688
+  function detectPlatform(url) {
+    if (/1688\.com/i.test(url)) return "1688";
+    if (/alibaba\.com/i.test(url)) return "alibaba";
+    return null;
+  }
+
   // استخراج itemId از لینک
   function extractItemId(url) {
     try {
@@ -162,6 +169,13 @@
         return;
       }
 
+      const platform = detectPlatform(fullUrl);
+      if (!platform) {
+        output.innerHTML =
+          "<div class='error'>فعلاً فقط لینک‌های Alibaba.com و 1688.com پشتیبانی می‌شود.</div>";
+        return;
+      }
+
       const itemId = extractItemId(fullUrl);
       if (!itemId) {
         output.innerHTML =
@@ -173,7 +187,9 @@
 
       try {
         const res = await fetch(
-          `/api/product?itemId=${encodeURIComponent(itemId)}`,
+          `/api/product?platform=${platform}&itemId=${encodeURIComponent(
+            itemId
+          )}`,
           { method: "GET" }
         );
 
@@ -190,11 +206,10 @@
           return;
         }
 
-        // ------ تطبیق با ساختار واقعی جواب تو ------
-        // json.data = کل جواب RapidAPI
+        // ----- پارس جواب: برای Alibaba جواب واقعی‌ات مثل نمونه است -----
         const root = json.data;
-        const resultNode = root.result || root.data || root;  // در نمونه‌ی تو: root.result
-        const item = resultNode.item || {};                   // در نمونه‌ی تو: result.item
+        const resultNode = root.result || root.data || root;
+        const item = resultNode.item || {};
         const settings = resultNode.settings || {};
 
         const title =
@@ -202,7 +217,6 @@
           item.itemTitle ||
           "عنوان نامشخص";
 
-        // قیمت: از priceModule → priceList[0].price
         let price = 0;
         let currency = settings.currency || "USD";
 
@@ -220,17 +234,20 @@
           }
         }
 
-        // تصویر اول
         let image = "";
         if (Array.isArray(item.images) && item.images.length > 0) {
           image = normalizeImageUrl(item.images[0]);
-        } else if (resultNode.description && Array.isArray(resultNode.description.images) && resultNode.description.images.length > 0) {
+        } else if (
+          resultNode.description &&
+          Array.isArray(resultNode.description.images) &&
+          resultNode.description.images.length > 0
+        ) {
           image = normalizeImageUrl(resultNode.description.images[0]);
         }
 
         // محاسبه قیمت تقریبی
-        const fxRate = 6500;   // هر 1 واحد ارز = ۶۵۰۰ تومان (مثال)
-        const feePercent = 10; // ۱۰٪ کارمزد
+        const fxRate = 6500;   // مثال
+        const feePercent = 10; // مثال
         const localPrice = Math.round(
           price * fxRate * (1 + feePercent / 100)
         );
@@ -246,7 +263,7 @@
             </div>
             <div class="product-details">
               <p><span class="label">عنوان محصول:</span><br>${title}</p>
-              <p><span class="label">قیمت اعلام‌شده (کمترین پلکان):</span><br>${price} ${currency}</p>
+              <p><span class="label">قیمت اعلام‌شده (پلکان اول):</span><br>${price} ${currency}</p>
               <p><span class="label">قیمت تقریبی (تومان):</span><br>${localPrice.toLocaleString(
                 "fa-IR"
               )} تومان</p>
@@ -267,6 +284,7 @@
       }
     });
 </script>
+
 
 </body>
 </html>
