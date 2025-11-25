@@ -1,6 +1,6 @@
 // api/product.js
 //
-// لیست اندپوینت‌هایی که این فایل استفاده می‌کند (همه با یک RAPIDAPI_KEY):
+// فقط این اندپوینت‌ها استفاده می‌شود:
 //
 // 1) Alibaba - Product Detail
 //    Host: alibaba-datahub.p.rapidapi.com
@@ -10,15 +10,7 @@
 //    Host: 1688-datahub.p.rapidapi.com
 //    Path: /item_detail?itemId={itemId}
 //
-// 3) Taobao/Tmall - Product Detail (TKL)
-//    Host: taobao-tmall-16881.p.rapidapi.com
-//    Path: /api/tkl/item/detail?provider=taobao&id={itemId}
-//
-// نکته‌ها:
-// - همه از یک env: RAPIDAPI_KEY استفاده می‌کنند.
-// - برای هر سرویس یک آرایه از providerها داریم؛
-//   اگر بعداً provider دوم هم اضافه کنی، به ترتیب چک می‌شوند
-//   و اگر اولی 429/403 داد (پلن/لیمیت)، می‌رود سراغ بعدی.
+// همه با یک env: RAPIDAPI_KEY کار می‌کنند.
 
 const SERVICES = {
   // جزئیات محصول Alibaba
@@ -30,12 +22,6 @@ const SERVICES = {
         `/item_detail?itemId=${encodeURIComponent(itemId)}`,
     },
     // اگر بعداً یک provider دیگر برای Alibaba داشتی، اینجا اضافه کن
-    // {
-    //   name: "alibaba-backup",
-    //   host: "some-other-host.p.rapidapi.com",
-    //   buildPath: ({ itemId }) =>
-    //     `/item_detail?itemId=${encodeURIComponent(itemId)}`,
-    // },
   ],
 
   // جزئیات محصول 1688
@@ -47,22 +33,10 @@ const SERVICES = {
         `/item_detail?itemId=${encodeURIComponent(itemId)}`,
     },
   ],
-
-  // جزئیات محصول Taobao/Tmall (TKL)
-  taobao_detail: [
-    {
-      name: "taobao-tmall-16881",
-      host: "taobao-tmall-16881.p.rapidapi.com",
-      buildPath: ({ itemId }) =>
-        `/api/tkl/item/detail?provider=taobao&id=${encodeURIComponent(
-          itemId
-        )}`,
-    },
-  ],
 };
 
 export default async function handler(req, res) {
-  // فعلاً فقط GET
+  // فقط GET
   if (req.method !== "GET") {
     return res.status(405).json({
       success: false,
@@ -70,7 +44,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const platform = req.query.platform || "alibaba"; // alibaba | 1688 | taobao
+  const platform = req.query.platform || "alibaba"; // alibaba | 1688
   const apiKey = process.env.RAPIDAPI_KEY;
 
   if (!apiKey) {
@@ -88,12 +62,10 @@ export default async function handler(req, res) {
     });
   }
 
-  // تعیین سرویس بر اساس پلتفرم
+  // انتخاب سرویس بر اساس پلتفرم
   let serviceKey;
   if (platform === "1688") {
     serviceKey = "1688_detail";
-  } else if (platform === "taobao") {
-    serviceKey = "taobao_detail";
   } else {
     // پیش‌فرض: Alibaba
     serviceKey = "alibaba_detail";
@@ -109,7 +81,7 @@ export default async function handler(req, res) {
 
   const errors = [];
 
-  // روی providerها حلقه می‌زنیم (برای آینده اگر چند تا داشته باشی)
+  // حلقه روی providerها (فعلاً برای هر کدوم فقط یکی هست)
   for (const provider of providers) {
     try {
       const path = provider.buildPath({ itemId });
@@ -129,7 +101,7 @@ export default async function handler(req, res) {
       });
 
       if (response.ok) {
-        // موفق شد، دیگه نیازی به بقیه providerها نیست
+        // موفق
         return res.status(200).json({
           success: true,
           platform,
@@ -141,7 +113,7 @@ export default async function handler(req, res) {
         });
       }
 
-      // اگر limit / پلن تموم شده (429 یا 403)، نگه می‌داریم و می‌رویم بعدی
+      // اگر limit / پلن تموم شده (429 یا 403)، برو بعدی
       if (response.status === 429 || response.status === 403) {
         errors.push({
           provider: provider.name,
@@ -149,10 +121,10 @@ export default async function handler(req, res) {
           status: response.status,
           data,
         });
-        continue; // برو provider بعدی
+        continue;
       }
 
-      // سایر خطاها: همان‌جا برگرد
+      // سایر خطاها
       return res.status(response.status).json({
         success: false,
         platform,
@@ -163,18 +135,17 @@ export default async function handler(req, res) {
         data,
       });
     } catch (err) {
-      // خطای شبکه / داخلی
       errors.push({
         provider: provider.name,
         host: provider.host,
         status: 500,
         error: err.message,
       });
-      continue; // برو provider بعدی (اگر وجود داشته باشد)
+      continue;
     }
   }
 
-  // اگر همه‌ی providerها fail شدند (مثلاً همه limit شدند)
+  // اگر همه fail شدن
   return res.status(429).json({
     success: false,
     error:
