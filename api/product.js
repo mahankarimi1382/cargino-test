@@ -1,12 +1,13 @@
 // api/product.js
 
 export default async function handler(req, res) {
-  // فقط GET قبول کنیم (کافیه برای تست)
+  // برای سادگی فعلاً فقط GET
   if (req.method !== "GET") {
     return res.status(405).json({ success: false, error: "Only GET allowed" });
   }
 
   const itemId = req.query.itemId;
+  const platform = req.query.platform || "alibaba"; // alibaba یا 1688
 
   if (!itemId) {
     return res
@@ -14,9 +15,7 @@ export default async function handler(req, res) {
       .json({ success: false, error: "itemId query parameter is required" });
   }
 
-  const host = process.env.RAPIDAPI_HOST || "alibaba-datahub.p.rapidapi.com";
   const apiKey = process.env.RAPIDAPI_KEY;
-
   if (!apiKey) {
     return res.status(500).json({
       success: false,
@@ -24,8 +23,19 @@ export default async function handler(req, res) {
     });
   }
 
-  // آدرس همون اندپوینت item_detail روی RapidAPI
-  const url = `https://${host}/item_detail?itemId=${encodeURIComponent(itemId)}`;
+  // انتخاب host بر اساس پلتفرم
+  let host;
+  if (platform === "1688") {
+    host = "1688-datahub.p.rapidapi.com";
+  } else {
+    // پیش‌فرض: Alibaba
+    host = "alibaba-datahub.p.rapidapi.com";
+  }
+
+  // هر دو سرویس ساختار URL شبیه هم دارن: /item_detail?itemId=...
+  const url = `https://${host}/item_detail?itemId=${encodeURIComponent(
+    itemId
+  )}`;
 
   try {
     const response = await fetch(url, {
