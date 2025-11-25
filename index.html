@@ -116,13 +116,34 @@
 
 <script>
   // استخراج itemId از لینک، مشابه الگوهای Alibaba
-  function extractItemId(url) {
-    const m1 = url.match(/_(\d+)\.html/);
-    if (m1) return m1[1];
-    const m2 = url.match(/\/(\d+)\.html/);
-    if (m2) return m2[1];
+// استخراج itemId از لینک محصول
+function extractItemId(url) {
+  try {
+    // اول فقط قبل از ? رو می‌گیریم (query string رو می‌بریم کنار)
+    const beforeQuery = url.split("?")[0];
+
+    // حالت رایج: ..._1601461818643.html یا .../1601461818643.html
+    let match = beforeQuery.match(/(\d{8,})\.html?/);
+    if (match) {
+      return match[1]; // همون عدد محصول
+    }
+
+    // اگر .html نداشت، میام کل URL رو می‌گردیم و
+    // هر دنباله عددی با طول ۸ رقم یا بیشتر رو پیدا می‌کنیم
+    const allNums = url.match(/\d{8,}/g);
+    if (allNums && allNums.length) {
+      // طولانی‌ترین عدد رو برمی‌گردونیم (معمولاً همون itemId است)
+      allNums.sort((a, b) => a.length - b.length);
+      return allNums[allNums.length - 1];
+    }
+
+    return null;
+  } catch (e) {
+    console.error("extractItemId error:", e);
     return null;
   }
+}
+
 
   document
     .getElementById("checkBtn")
