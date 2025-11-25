@@ -1,7 +1,8 @@
 // api/rates.js
 //
 // گرفتن نرخ لحظه‌ای از USD → IRR و CNY → و تبدیل به تومن
-// از سرویس رایگان https://api.exchangerate.host/latest استفاده می‌کنیم.
+// از سرویس رایگان https://open.er-api.com/v6/latest/USD استفاده می‌کنیم.
+// این سرویس IRR و CNY را برمی‌گرداند و API key هم نمی‌خواهد.
 
 export default async function handler(req, res) {
   if (req.method !== "GET") {
@@ -12,14 +13,25 @@ export default async function handler(req, res) {
   }
 
   try {
-    // یک درخواست: پایه USD، فقط نرخ‌های IRR و CNY
-    const url =
-      "https://api.exchangerate.host/latest?base=USD&symbols=IRR,CNY";
+    const url = "https://open.er-api.com/v6/latest/USD";
 
     const response = await fetch(url);
     const data = await response.json();
 
-    if (!data || !data.rates || !data.rates.IRR || !data.rates.CNY) {
+    // ساختار پاسخ:
+    // {
+    //   result: "success",
+    //   base_code: "USD",
+    //   rates: { USD:1, IRR:..., CNY:..., ... }
+    // }
+
+    if (
+      !data ||
+      data.result !== "success" ||
+      !data.rates ||
+      !data.rates.IRR ||
+      !data.rates.CNY
+    ) {
       return res.status(500).json({
         success: false,
         error: "نرخ ارز IRR یا CNY قابل دریافت نیست.",
@@ -39,8 +51,9 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      base: data.base,
-      date: data.date,
+      provider: data.provider,
+      base_code: data.base_code,
+      time_last_update_utc: data.time_last_update_utc,
       usdToIrr,
       cnyToIrr,
       usdToToman,
