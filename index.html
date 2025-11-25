@@ -115,35 +115,31 @@
 </div>
 
 <script>
-  // استخراج itemId از لینک، مشابه الگوهای Alibaba
-// استخراج itemId از لینک محصول
-function extractItemId(url) {
-  try {
-    // اول فقط قبل از ? رو می‌گیریم (query string رو می‌بریم کنار)
-    const beforeQuery = url.split("?")[0];
+  // استخراج itemId از لینک
+  function extractItemId(url) {
+    try {
+      const beforeQuery = url.split("?")[0];
+      let match = beforeQuery.match(/(\d{8,})\.html?/);
+      if (match) return match[1];
 
-    // حالت رایج: ..._1601461818643.html یا .../1601461818643.html
-    let match = beforeQuery.match(/(\d{8,})\.html?/);
-    if (match) {
-      return match[1]; // همون عدد محصول
+      const allNums = url.match(/\d{8,}/g);
+      if (allNums && allNums.length) {
+        allNums.sort((a, b) => a.length - b.length);
+        return allNums[allNums.length - 1];
+      }
+      return null;
+    } catch (e) {
+      console.error("extractItemId error:", e);
+      return null;
     }
-
-    // اگر .html نداشت، میام کل URL رو می‌گردیم و
-    // هر دنباله عددی با طول ۸ رقم یا بیشتر رو پیدا می‌کنیم
-    const allNums = url.match(/\d{8,}/g);
-    if (allNums && allNums.length) {
-      // طولانی‌ترین عدد رو برمی‌گردونیم (معمولاً همون itemId است)
-      allNums.sort((a, b) => a.length - b.length);
-      return allNums[allNums.length - 1];
-    }
-
-    return null;
-  } catch (e) {
-    console.error("extractItemId error:", e);
-    return null;
   }
-}
 
+  // تبدیل //sc04.alicdn.com/... به https://sc04.alicdn.com/...
+  function normalizeImageUrl(url) {
+    if (!url) return "";
+    if (url.startsWith("//")) return "https:" + url;
+    return url;
+  }
 
   document
     .getElementById("checkBtn")
@@ -176,17 +172,12 @@ function extractItemId(url) {
       output.innerHTML = "در حال ارسال درخواست به سرور...";
 
       try {
-        const res = await fetch(`/api/product?itemId=${encodeURIComponent(itemId)}`, {
-          method: "GET"
-        });
+        const res = await fetch(
+          `/api/product?itemId=${encodeURIComponent(itemId)}`,
+          { method: "GET" }
+        );
 
-        const json = await res.json().catch(() => null);
-
-        if (!json) {
-          output.innerHTML =
-            "<div class='error'>پاسخ سرور قابل‌خواندن نیست.</div>";
-          return;
-        }
+        const json = await res.json();
 
         if (!json.success) {
           output.innerHTML =
@@ -195,32 +186,51 @@ function extractItemId(url) {
             "</div>" +
             (json.data
               ? "<pre>" + JSON.stringify(json.data, null, 2) + "</pre>"
-              : json.debug
-              ? "<pre>" + JSON.stringify(json.debug, null, 2) + "</pre>"
               : "");
           return;
         }
 
-        // حالا json.data همان پاسخی است که از API اصلی آمده
-        const dataNode = json.data.data || json.data.result || json.data;
+        // ------ تطبیق با ساختار واقعی جواب تو ------
+        // json.data = کل جواب RapidAPI
+        const root = json.data;
+        const resultNode = root.result || root.data || root;  // در نمونه‌ی تو: root.result
+        const item = resultNode.item || {};                   // در نمونه‌ی تو: result.item
+        const settings = resultNode.settings || {};
 
         const title =
-          dataNode.title ||
-          dataNode.itemTitle ||
+          item.title ||
+          item.itemTitle ||
           "عنوان نامشخص";
-        const price =
-          dataNode.price ||
-          dataNode.minPrice ||
-          dataNode.min_price ||
-          0;
-        const currency = dataNode.currency || "USD";
-        const image =
-          (dataNode.images && dataNode.images[0]) ||
-          dataNode.mainImage ||
-          "";
 
-        const fxRate = 6500; // فرضی: هر واحد ارز ۶۵۰۰ تومان
-        const feePercent = 10; // ۱۰٪ کارمزد مثال
+        // قیمت: از priceModule → priceList[0].price
+        let price = 0;
+        let currency = settings.currency || "USD";
+
+        if (
+          item.sku &&
+          item.sku.def &&
+          item.sku.def.priceModule &&
+          Array.isArray(item.sku.def.priceModule.priceList) &&
+          item.sku.def.priceModule.priceList.length > 0
+        ) {
+          const priceModule = item.sku.def.priceModule;
+          price = Number(priceModule.priceList[0].price) || 0;
+          if (priceModule.currencyCode && priceModule.currencyCode !== "$") {
+            currency = priceModule.currencyCode;
+          }
+        }
+
+        // تصویر اول
+        let image = "";
+        if (Array.isArray(item.images) && item.images.length > 0) {
+          image = normalizeImageUrl(item.images[0]);
+        } else if (resultNode.description && Array.isArray(resultNode.description.images) && resultNode.description.images.length > 0) {
+          image = normalizeImageUrl(resultNode.description.images[0]);
+        }
+
+        // محاسبه قیمت تقریبی
+        const fxRate = 6500;   // هر 1 واحد ارز = ۶۵۰۰ تومان (مثال)
+        const feePercent = 10; // ۱۰٪ کارمزد
         const localPrice = Math.round(
           price * fxRate * (1 + feePercent / 100)
         );
@@ -236,7 +246,7 @@ function extractItemId(url) {
             </div>
             <div class="product-details">
               <p><span class="label">عنوان محصول:</span><br>${title}</p>
-              <p><span class="label">قیمت اعلام‌شده:</span><br>${price} ${currency}</p>
+              <p><span class="label">قیمت اعلام‌شده (کمترین پلکان):</span><br>${price} ${currency}</p>
               <p><span class="label">قیمت تقریبی (تومان):</span><br>${localPrice.toLocaleString(
                 "fa-IR"
               )} تومان</p>
@@ -257,5 +267,6 @@ function extractItemId(url) {
       }
     });
 </script>
+
 </body>
 </html>
