@@ -1,25 +1,24 @@
 // api/product.js
 //
-// لیست سرویس‌هایی که این فایل استفاده می‌کند (همه از RapidAPI با یک RAPIDAPI_KEY):
+// لیست اندپوینت‌هایی که این فایل استفاده می‌کند (همه با یک RAPIDAPI_KEY):
 //
-// 1) Alibaba product detail
+// 1) Alibaba - Product Detail
 //    Host: alibaba-datahub.p.rapidapi.com
 //    Path: /item_detail?itemId={itemId}
 //
-// 2) 1688 product detail
+// 2) 1688 - Product Detail
 //    Host: 1688-datahub.p.rapidapi.com
 //    Path: /item_detail?itemId={itemId}
 //
-// 3) Taobao/Tmall product detail (TKL)
+// 3) Taobao/Tmall - Product Detail (TKL)
 //    Host: taobao-tmall-16881.p.rapidapi.com
 //    Path: /api/tkl/item/detail?provider=taobao&id={itemId}
 //
-// 4) Taobao search
-//    Host: taobao-datahub.p.rapidapi.com
-//    Path: /item_search?q={q}&page={page}&loc={loc}&startPrice={startPrice}&endPrice={endPrice}&switches={switches}&pageSize={pageSize}
-//
-// نکته: همهٔ این‌ها از یک env: RAPIDAPI_KEY استفاده می‌کنند.
-// ساختار مشابه برای افزودن providerهای جدید (مثلاً Alibaba دوم) آماده است.
+// نکته‌ها:
+// - همه از یک env: RAPIDAPI_KEY استفاده می‌کنند.
+// - برای هر سرویس یک آرایه از providerها داریم؛
+//   اگر بعداً provider دوم هم اضافه کنی، به ترتیب چک می‌شوند
+//   و اگر اولی 429/403 داد (پلن/لیمیت)، می‌رود سراغ بعدی.
 
 const SERVICES = {
   // جزئیات محصول Alibaba
@@ -30,7 +29,13 @@ const SERVICES = {
       buildPath: ({ itemId }) =>
         `/item_detail?itemId=${encodeURIComponent(itemId)}`,
     },
-    // اگر بعداً یک provider دیگر برای Alibaba داشتی، اینجا یک object دیگر اضافه کن.
+    // اگر بعداً یک provider دیگر برای Alibaba داشتی، اینجا اضافه کن
+    // {
+    //   name: "alibaba-backup",
+    //   host: "some-other-host.p.rapidapi.com",
+    //   buildPath: ({ itemId }) =>
+    //     `/item_detail?itemId=${encodeURIComponent(itemId)}`,
+    // },
   ],
 
   // جزئیات محصول 1688
@@ -54,28 +59,6 @@ const SERVICES = {
         )}`,
     },
   ],
-
-  // سرچ محصول در Taobao
-  taobao_search: [
-    {
-      name: "taobao-datahub",
-      host: "taobao-datahub.p.rapidapi.com",
-      buildPath: ({ query }) => {
-        const params = new URLSearchParams();
-
-        if (query.q) params.set("q", query.q);
-        if (query.page) params.set("page", query.page);
-        if (query.loc) params.set("loc", query.loc);
-        if (query.startPrice) params.set("startPrice", query.startPrice);
-        if (query.endPrice) params.set("endPrice", query.endPrice);
-        if (query.switches) params.set("switches", query.switches);
-        if (query.pageSize) params.set("pageSize", query.pageSize);
-
-        // اگر خواستی می‌تونی اینجا default بذاری (مثلاً page=1, pageSize=20)
-        return `/item_search?${params.toString()}`;
-      },
-    },
-  ],
 };
 
 export default async function handler(req, res) {
@@ -87,10 +70,9 @@ export default async function handler(req, res) {
     });
   }
 
-  const platform = req.query.platform || "alibaba"; // alibaba | 1688 | taobao | taobao_search
-  const action = req.query.action || "detail"; // detail | search
-
+  const platform = req.query.platform || "alibaba"; // alibaba | 1688 | taobao
   const apiKey = process.env.RAPIDAPI_KEY;
+
   if (!apiKey) {
     return res.status(500).json({
       success: false,
@@ -98,28 +80,23 @@ export default async function handler(req, res) {
     });
   }
 
-  let serviceKey;
+  const itemId = req.query.itemId;
+  if (!itemId) {
+    return res.status(400).json({
+      success: false,
+      error: "itemId query parameter is required",
+    });
+  }
 
-  if (action === "search") {
-    // فعلاً فقط سرچ Taobao را پشتیبانی می‌کنیم
-    if (platform === "taobao" || platform === "taobao_search") {
-      serviceKey = "taobao_search";
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: "search فعلاً فقط برای Taobao پشتیبانی می‌شود.",
-      });
-    }
+  // تعیین سرویس بر اساس پلتفرم
+  let serviceKey;
+  if (platform === "1688") {
+    serviceKey = "1688_detail";
+  } else if (platform === "taobao") {
+    serviceKey = "taobao_detail";
   } else {
-    // action = detail
-    if (platform === "1688") {
-      serviceKey = "1688_detail";
-    } else if (platform === "taobao") {
-      serviceKey = "taobao_detail";
-    } else {
-      // پیش‌فرض: Alibaba
-      serviceKey = "alibaba_detail";
-    }
+    // پیش‌فرض: Alibaba
+    serviceKey = "alibaba_detail";
   }
 
   const providers = SERVICES[serviceKey];
@@ -130,35 +107,12 @@ export default async function handler(req, res) {
     });
   }
 
-  // اعتبارسنجی پارامترها
-  const itemId = req.query.itemId;
-
-  if (action === "detail" && !itemId) {
-    return res.status(400).json({
-      success: false,
-      error: "itemId query parameter is required for detail action",
-    });
-  }
-
-  if (action === "search") {
-    if (!req.query.q) {
-      return res.status(400).json({
-        success: false,
-        error: "q query parameter is required for search action",
-      });
-    }
-  }
-
   const errors = [];
 
-  // روی لیست providerها حلقه می‌زنیم (برای failover اگر یکی limit شد)
+  // روی providerها حلقه می‌زنیم (برای آینده اگر چند تا داشته باشی)
   for (const provider of providers) {
     try {
-      const path = provider.buildPath({
-        itemId,
-        query: req.query,
-      });
-
+      const path = provider.buildPath({ itemId });
       const url = `https://${provider.host}${path}`;
 
       const response = await fetch(url, {
@@ -175,9 +129,10 @@ export default async function handler(req, res) {
       });
 
       if (response.ok) {
-        // موفق
+        // موفق شد، دیگه نیازی به بقیه providerها نیست
         return res.status(200).json({
           success: true,
+          platform,
           service: serviceKey,
           provider: provider.name,
           host: provider.host,
@@ -186,7 +141,7 @@ export default async function handler(req, res) {
         });
       }
 
-      // اگر پلن تموم شده/limit (مثلاً 429 یا بعضی وقت‌ها 403)، می‌رویم سراغ provider بعدی
+      // اگر limit / پلن تموم شده (429 یا 403)، نگه می‌داریم و می‌رویم بعدی
       if (response.status === 429 || response.status === 403) {
         errors.push({
           provider: provider.name,
@@ -194,12 +149,13 @@ export default async function handler(req, res) {
           status: response.status,
           data,
         });
-        continue;
+        continue; // برو provider بعدی
       }
 
-      // سایر خطاها را همان‌جا برمی‌گردانیم (مثلاً 401, 404, 500)
+      // سایر خطاها: همان‌جا برگرد
       return res.status(response.status).json({
         success: false,
+        platform,
         service: serviceKey,
         provider: provider.name,
         host: provider.host,
@@ -214,15 +170,16 @@ export default async function handler(req, res) {
         status: 500,
         error: err.message,
       });
-      continue;
+      continue; // برو provider بعدی (اگر وجود داشته باشد)
     }
   }
 
-  // اگر همه‌ی providerها خطا دادن یا limit شدند
+  // اگر همه‌ی providerها fail شدند (مثلاً همه limit شدند)
   return res.status(429).json({
     success: false,
     error:
-      "هیچ‌کدام از سرویس‌های این پلتفرم پاسخ موفق ندادند (ممکن است همه به سقف پلن رسیده باشند یا خطا داشته باشند).",
+      "هیچ‌کدام از سرویس‌های این پلتفرم پاسخ موفق ندادند (ممکن است همه به سقف پلن رسیده باشند یا خطای دیگر داشته باشند).",
+    platform,
     service: serviceKey,
     providersTried: errors,
   });
