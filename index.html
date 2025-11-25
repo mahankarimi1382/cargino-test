@@ -141,11 +141,35 @@
     }
   }
 
-  // تبدیل //sc04.alicdn.com/... به https://sc04.alicdn.com/...
+  // //sc04.alicdn.com/... → https://sc04.alicdn.com/...
   function normalizeImageUrl(url) {
     if (!url) return "";
     if (url.startsWith("//")) return "https:" + url;
     return url;
+  }
+
+  // انتخاب عکس مناسب برای هر پلتفرم
+  function pickImage(platform, item, resultNode) {
+    const candidates = [];
+
+    // 1) اول از item.images
+    if (Array.isArray(item.images)) {
+      candidates.push(...item.images);
+    }
+
+    // 2) بعد از description.images
+    if (
+      resultNode.description &&
+      Array.isArray(resultNode.description.images)
+    ) {
+      candidates.push(...resultNode.description.images);
+    }
+
+    const raw = candidates.find(
+      (u) => typeof u === "string" && u.trim() !== ""
+    );
+    if (!raw) return "";
+    return normalizeImageUrl(raw);
   }
 
   document
@@ -206,7 +230,7 @@
           return;
         }
 
-        // ----- پارس جواب: برای Alibaba جواب واقعی‌ات مثل نمونه است -----
+        // ----- پارس جواب -----
         const root = json.data;
         const resultNode = root.result || root.data || root;
         const item = resultNode.item || {};
@@ -217,60 +241,43 @@
           item.itemTitle ||
           "عنوان نامشخص";
 
-// قیمت و ارز
-let price = 0;
-let currency = settings.currency || (platform === "1688" ? "CNY" : "USD");
+        // ---- قیمت (همون منطق فعلی: Alibaba + 1688) ----
+        let price = 0;
+        let currency = settings.currency || (platform === "1688" ? "CNY" : "USD");
 
-if (platform === "1688") {
-  // ---------- منطق 1688 ----------
-  if (item.sku) {
-    const saleInfo = item.sku.saleInfo || {};
+        if (platform === "1688") {
+          const saleInfo = item.sku?.saleInfo || {};
 
-    // اول از promotionPrice (یا skuRangePrice) استفاده می‌کنیم
-    if (Array.isArray(saleInfo.promotionPrice) && saleInfo.promotionPrice.length > 0) {
-      price = Number(saleInfo.promotionPrice[0].price) || 0;
-    } else if (Array.isArray(saleInfo.skuRangePrice) && saleInfo.skuRangePrice.length > 0) {
-      price = Number(saleInfo.skuRangePrice[0].price) || 0;
-    }
+          if (Array.isArray(saleInfo.promotionPrice) && saleInfo.promotionPrice.length > 0) {
+            price = Number(saleInfo.promotionPrice[0].price) || 0;
+          } else if (Array.isArray(saleInfo.skuRangePrice) && saleInfo.skuRangePrice.length > 0) {
+            price = Number(saleInfo.skuRangePrice[0].price) || 0;
+          }
 
-    // اگر هنوز ۰ بود، از def.price مثل "65.49 - 319.68" عدد اول رو دربیار
-    if (!price && item.sku.def && item.sku.def.price) {
-      const match = String(item.sku.def.price).match(/[\d.]+/);
-      if (match) {
-        price = Number(match[0]) || 0;
-      }
-    }
-  }
-} else {
-  // ---------- منطق Alibaba (مثل قبل) ----------
-  if (
-    item.sku &&
-    item.sku.def &&
-    item.sku.def.priceModule &&
-    Array.isArray(item.sku.def.priceModule.priceList) &&
-    item.sku.def.priceModule.priceList.length > 0
-  ) {
-    const priceModule = item.sku.def.priceModule;
-    price = Number(priceModule.priceList[0].price) || 0;
-    if (priceModule.currencyCode && priceModule.currencyCode !== "$") {
-      currency = priceModule.currencyCode;
-    }
-  }
-}
-
-
-        let image = "";
-        if (Array.isArray(item.images) && item.images.length > 0) {
-          image = normalizeImageUrl(item.images[0]);
-        } else if (
-          resultNode.description &&
-          Array.isArray(resultNode.description.images) &&
-          resultNode.description.images.length > 0
-        ) {
-          image = normalizeImageUrl(resultNode.description.images[0]);
+          if (!price && item.sku?.def?.price) {
+            const match = String(item.sku.def.price).match(/[\d.]+/);
+            if (match) price = Number(match[0]) || 0;
+          }
+        } else {
+          if (
+            item.sku &&
+            item.sku.def &&
+            item.sku.def.priceModule &&
+            Array.isArray(item.sku.def.priceModule.priceList) &&
+            item.sku.def.priceModule.priceList.length > 0
+          ) {
+            const priceModule = item.sku.def.priceModule;
+            price = Number(priceModule.priceList[0].price) || 0;
+            if (priceModule.currencyCode && priceModule.currencyCode !== "$") {
+              currency = priceModule.currencyCode;
+            }
+          }
         }
 
-        // محاسبه قیمت تقریبی
+        // ---- عکس: با توجه به platform و item / description ----
+        const image = pickImage(platform, item, resultNode);
+
+        // محاسبه قیمت تقریبی به تومان (همون قبلی)
         const fxRate = 6500;   // مثال
         const feePercent = 10; // مثال
         const localPrice = Math.round(
@@ -282,7 +289,10 @@ if (platform === "1688") {
             <div>
               ${
                 image
-                  ? `<img src="${image}" alt="image" />`
+                  ? `<img src="${image}" alt="image" />
+                     <div class="note" style="margin-top:6px;font-size:11px;direction:ltr;">
+                       Image URL: <a href="${image}" target="_blank">${image}</a>
+                     </div>`
                   : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">بدون تصویر</div>`
               }
             </div>
