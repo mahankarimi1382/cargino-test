@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="fa">
+<head>
+  <meta charset="UTF-8" />
+  <title>استعلام محصول از Alibaba</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #f5f5f5;
+      direction: rtl;
+    }
+    .container {
+      max-width: 700px;
+      margin: 40px auto;
+      background: #fff;
+      padding: 20px 25px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+    h1 {
+      font-size: 22px;
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    input {
+      direction: ltr;
+    }
+    button {
+      background-color: #007bff;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    .result {
+      margin-top: 20px;
+      background: #fafafa;
+      padding: 15px;
+      border-radius: 6px;
+    }
+    .error {
+      color: #b00020;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    .product {
+      display: flex;
+      gap: 20px;
+      margin-top: 10px;
+    }
+    .product img {
+      max-width: 220px;
+      border-radius: 6px;
+      border: 1px solid #eee;
+    }
+    .product-details {
+      flex: 1;
+    }
+    .label {
+      font-weight: bold;
+    }
+    pre {
+      background: #eee;
+      padding: 10px;
+      border-radius: 4px;
+      direction: ltr;
+      text-align: left;
+      max-height: 220px;
+      overflow: auto;
+      font-size: 11px;
+    }
+    .note {
+      font-size: 12px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>استعلام قیمت از Alibaba</h1>
+
+  <label for="productUrl">لینک محصول Alibaba:</label>
+  <input type="url" id="productUrl"
+         placeholder="https://www.alibaba.com/product-detail/...">
+
+  <label for="quantity">تعداد:</label>
+  <input type="number" id="quantity" min="1" value="1">
+
+  <button id="checkBtn">دریافت اطلاعات محصول</button>
+
+  <p class="note">
+    لینک را مستقیم از صفحه محصول در Alibaba.com کپی کنید.
+  </p>
+
+  <div id="output" class="result"></div>
+</div>
+
+<script>
+  // آدرس endpoint PHP روی سرور خودت
+  // اگر اسم/مسیر فایل را عوض کردی، اینجا را هم عوض کن
+  const API_URL = "alibaba_api.php";
+
+  function extractItemId(url) {
+    // حالت رایج: ..._1601461818643.html
+    let match = url.match(/_(\d+)\.html/);
+    if (match) return match[1];
+    // حالت جایگزین: .../1601461818643.html
+    match = url.match(/\/(\d+)\.html/);
+    if (match) return match[1];
+    return null;
+  }
+
+  document.getElementById("checkBtn").addEventListener("click", async () => {
+    const productUrlInput = document.getElementById("productUrl");
+    const quantityInput   = document.getElementById("quantity");
+    const output          = document.getElementById("output");
+
+    const productUrl = productUrlInput.value.trim();
+    let quantity     = parseInt(quantityInput.value, 10);
+
+    output.innerHTML = "";
+
+    if (!productUrl) {
+      output.innerHTML = "<div class='error'>لطفاً لینک محصول را وارد کن.</div>";
+      return;
+    }
+
+    if (!/^https?:\/\//i.test(productUrl)) {
+      output.innerHTML = "<div class='error'>فرمت لینک معتبر نیست.</div>";
+      return;
+    }
+
+    if (isNaN(quantity) || quantity < 1) {
+      quantity = 1;
+    }
+
+    // (اختیاری) می‌تونی همین‌جا چک کنی itemId از لینک دربیاد یا نه
+    const itemIdTest = extractItemId(productUrl);
+    if (!itemIdTest) {
+      output.innerHTML = "<div class='error'>نتوانستم itemId را از لینک دربیاورم، ولی هنوز ممکن است سرور بتواند. ادامه می‌دهیم...</div>";
+    } else {
+      output.innerHTML = "در حال ارتباط با سرور...";
+    }
+
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          productUrl,
+          quantity
+        })
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        output.innerHTML =
+          "<div class='error'>" +
+          (data.error ? data.error : "خطای نامشخصی رخ داد.") +
+          "</div>" +
+          (data.debug ? "<pre>" + JSON.stringify(data.debug, null, 2) + "</pre>" : "");
+        return;
+      }
+
+      const p = data.product;
+
+      output.innerHTML = `
+        <div class="product">
+          <div>
+            ${p.imageUrl
+              ? `<img src="${p.imageUrl}" alt="image">`
+              : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">بدون تصویر</div>`
+            }
+          </div>
+          <div class="product-details">
+            <p><span class="label">عنوان محصول:</span><br>${p.title}</p>
+            <p><span class="label">قیمت Alibaba:</span><br>
+              ${p.price} ${p.currency} × ${p.quantity} = ${p.totalForeign} ${p.currency}
+            </p>
+            <p><span class="label">قیمت تقریبی برای شما:</span><br>
+              ${p.localPrice.toLocaleString("fa-IR")} تومان
+            </p>
+          </div>
+        </div>
+        <hr>
+        <div class="note">
+          <strong>اطلاعات خام از API (برای دیباگ):</strong>
+          <pre>${JSON.stringify(data.raw, null, 2)}</pre>
+        </div>
+      `;
+    } catch (e) {
+      console.error(e);
+      output.innerHTML = `<div class="error">خطا در ارتباط با سرور: ${e.message}</div>`;
+    }
+  });
+</script>
+</body>
+</html>
