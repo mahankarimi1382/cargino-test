@@ -283,18 +283,25 @@
         const localPrice = Math.round(
           price * fxRate * (1 + feePercent / 100)
         );
+const productUrl = fullUrl; // همون لینکی که کاربر وارد کرد
 
+const canEmbedImage = platform === "alibaba"; // 1688 اجازه نمایش مستقیم نمی‌ده
         output.innerHTML = `
           <div class="product">
             <div>
-              ${
-                image
-                  ? `<img src="${image}" alt="image" />
-                     <div class="note" style="margin-top:6px;font-size:11px;direction:ltr;">
-                       Image URL: <a href="${image}" target="_blank">${image}</a>
-                     </div>`
-                  : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">بدون تصویر</div>`
-              }
+      ${
+        image && canEmbedImage
+          ? `<img src="${image}" alt="image" />
+             <div class="note" style="margin-top:6px;font-size:11px;direction:ltr;">
+               Image URL: <a href="${image}" target="_blank">${image}</a>
+             </div>`
+          : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">
+               تصویر به‌صورت مستقیم از 1688 قابل نمایش نیست
+             </div>
+             <div style="margin-top:8px;">
+               <a href="${productUrl}" target="_blank">مشاهده تصاویر در صفحه محصول 1688</a>
+             </div>`
+      }
             </div>
             <div class="product-details">
               <p><span class="label">عنوان محصول:</span><br>${title}</p>
