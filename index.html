@@ -117,20 +117,17 @@
 <script>
   // --- کمک‌کننده‌ها ---
 
-  // تشخیص اینکه لینک برای Alibaba است یا 1688
   function detectPlatform(url) {
     if (/1688\.com/i.test(url)) return "1688";
     if (/alibaba\.com/i.test(url)) return "alibaba";
     return null;
   }
 
-  // استخراج itemId از لینک
   function extractItemId(url) {
     try {
       const beforeQuery = url.split("?")[0];
       let match = beforeQuery.match(/(\d{8,})\.html?/);
       if (match) return match[1];
-
       const allNums = url.match(/\d{8,}/g);
       if (allNums && allNums.length) {
         allNums.sort((a, b) => a.length - b.length);
@@ -143,282 +140,151 @@
     }
   }
 
-  // //sc04.alicdn.com/... → https://sc04.alicdn.com/...
   function normalizeImageUrl(url) {
     if (!url) return "";
     if (url.startsWith("//")) return "https:" + url;
     return url;
   }
 
-  // انتخاب عکس مناسب از item.images و description.images
   function pickImage(item, resultNode) {
     const candidates = [];
-
-    if (Array.isArray(item.images)) {
-      candidates.push(...item.images);
-    }
-
-    if (
-      resultNode.description &&
-      Array.isArray(resultNode.description.images)
-    ) {
+    if (Array.isArray(item.images)) candidates.push(...item.images);
+    if (resultNode.description && Array.isArray(resultNode.description.images))
       candidates.push(...resultNode.description.images);
-    }
-
-    const raw = candidates.find(
-      (u) => typeof u === "string" && u.trim() !== ""
-    );
+    const raw = candidates.find((u) => typeof u === "string" && u.trim() !== "");
     if (!raw) return "";
     return normalizeImageUrl(raw);
   }
 
-  // --- نرخ ارز از بک‌اند (/api/rates) ---
+  // --- دکمه بررسی محصول ---
+  document.getElementById("checkBtn").addEventListener("click", async () => {
+    const productUrlInput = document.getElementById("productUrl");
+    const output = document.getElementById("output");
+    const fullUrl = productUrlInput.value.trim();
+    output.innerHTML = "";
 
-  let cachedRates = null;
-
-  async function ensureFxRates() {
-    if (cachedRates) return cachedRates;
-
-    const res = await fetch("/api/rates");
-    const json = await res.json();
-
-    // لاگ کامل پاسخ نرخ ارز
-    console.log("FX /api/rates response:", json);
-
-    if (!json.success) {
-      throw new Error(json.error || "خطا در دریافت نرخ ارز");
+    if (!fullUrl) {
+      output.innerHTML = "<div class='error'>لطفاً لینک محصول را وارد کن.</div>";
+      return;
     }
 
-    cachedRates = json; // { usdToToman, cnyToToman, ... }
-    return json;
-  }
+    const platform = detectPlatform(fullUrl);
+    if (!platform) {
+      output.innerHTML =
+        "<div class='error'>فعلاً فقط لینک‌های Alibaba.com و 1688.com پشتیبانی می‌شود.</div>";
+      return;
+    }
 
-  // --- رویداد روی دکمه ---
+    const itemId = extractItemId(fullUrl);
+    if (!itemId) {
+      output.innerHTML =
+        "<div class='error'>نتوانستم itemId را از لینک دربیاورم.</div>";
+      return;
+    }
 
-  document
-    .getElementById("checkBtn")
-    .addEventListener("click", async () => {
-      const productUrlInput = document.getElementById("productUrl");
-      const output = document.getElementById("output");
-      const fullUrl = productUrlInput.value.trim();
+    output.innerHTML = "در حال دریافت اطلاعات محصول...";
 
-      output.innerHTML = "";
+    try {
+      const res = await fetch(
+        `/api/product?platform=${platform}&itemId=${encodeURIComponent(itemId)}`
+      );
+      const json = await res.json();
 
-      if (!fullUrl) {
+      if (!json.success) {
         output.innerHTML =
-          "<div class='error'>لطفاً لینک محصول را وارد کن.</div>";
+          "<div class='error'>" +
+          (json.error || "خطای نامشخص از سرور") +
+          "</div>" +
+          (json.data ? "<pre>" + JSON.stringify(json.data, null, 2) + "</pre>" : "");
         return;
       }
 
-      if (!/^https?:\/\//i.test(fullUrl)) {
-        output.innerHTML =
-          "<div class='error'>فرمت لینک معتبر نیست.</div>";
-        return;
-      }
+      const root = json.data;
+      const resultNode = root.result || root.data || root;
+      const item = resultNode.item || {};
+      const settings = resultNode.settings || {};
 
-      const platform = detectPlatform(fullUrl);
-      if (!platform) {
-        output.innerHTML =
-          "<div class='error'>فعلاً فقط لینک‌های Alibaba.com و 1688.com پشتیبانی می‌شود.</div>";
-        return;
-      }
+      const title = item.title || item.itemTitle || "عنوان نامشخص";
+      const image = pickImage(item, resultNode);
 
-      const itemId = extractItemId(fullUrl);
-      if (!itemId) {
-        output.innerHTML =
-          "<div class='error'>نتوانستم itemId را از لینک دربیاورم.</div>";
-        return;
-      }
+      // ---- محاسبه بیشترین قیمت ----
+      let price = 0;
+      let currency = settings.currency || (platform === "1688" ? "CNY" : "USD");
 
-      output.innerHTML = "در حال دریافت نرخ ارز و اطلاعات محصول...";
+      if (platform === "1688") {
+        if (item.sku) {
+          const saleInfo = item.sku.saleInfo || {};
+          let prices = [];
 
-      try {
-        // ۱) نرخ ارز واقعی از بک‌اند
-        const rates = await ensureFxRates();
+          if (Array.isArray(saleInfo.promotionPrice))
+            prices.push(
+              ...saleInfo.promotionPrice
+                .map((p) => Number(p.price))
+                .filter((v) => !isNaN(v))
+            );
+          if (Array.isArray(saleInfo.skuRangePrice))
+            prices.push(
+              ...saleInfo.skuRangePrice
+                .map((p) => Number(p.price))
+                .filter((v) => !isNaN(v))
+            );
 
-        console.log("Using FX rates for conversion:", {
-          usdToToman: rates.usdToToman,
-          cnyToToman: rates.cnyToToman,
-        });
-
-        // ۲) گرفتن اطلاعات محصول از بک‌اند
-        const res = await fetch(
-          `/api/product?platform=${platform}&itemId=${encodeURIComponent(
-            itemId
-          )}`,
-          { method: "GET" }
-        );
-
-        const json = await res.json();
-
-        if (!json.success) {
-          output.innerHTML =
-            "<div class='error'>" +
-            (json.error || "خطای نامشخص از سرور") +
-            "</div>" +
-            (json.data
-              ? "<pre>" + JSON.stringify(json.data, null, 2) + "</pre>"
-              : "");
-          return;
-        }
-
-        // ----- پارس جواب اصلی RapidAPI -----
-        const root = json.data;
-        const resultNode = root.result || root.data || root;
-        const item = resultNode.item || {};
-        const settings = resultNode.settings || {};
-
-        const title =
-          item.title ||
-          item.itemTitle ||
-          "عنوان نامشخص";
-
-        // عکس
-        const image = pickImage(item, resultNode);
-
-        // ---- محاسبه قیمت: بیشترین قیمت پلکانی ----
-        let price = 0;
-        let currency = settings.currency || (platform === "1688" ? "CNY" : "USD");
-
-        if (platform === "1688") {
-          // 1688: از promotionPrice / skuRangePrice / def.price، بیشترین عدد
-          if (item.sku) {
-            const saleInfo = item.sku.saleInfo || {};
-            let prices = [];
-
-            if (
-              Array.isArray(saleInfo.promotionPrice) &&
-              saleInfo.promotionPrice.length > 0
-            ) {
-              prices.push(
-                ...saleInfo.promotionPrice
-                  .map((p) => Number(p.price))
-                  .filter((v) => !Number.isNaN(v))
-              );
-            }
-
-            if (
-              Array.isArray(saleInfo.skuRangePrice) &&
-              saleInfo.skuRangePrice.length > 0
-            ) {
-              prices.push(
-                ...saleInfo.skuRangePrice
-                  .map((p) => Number(p.price))
-                  .filter((v) => !Number.isNaN(v))
-              );
-            }
-
-            // اگر هنوز قیمت نداریم، از def.price مثل "65.49 - 319.68" استفاده کن
-            if (!prices.length && item.sku.def && item.sku.def.price) {
-              const matches = String(item.sku.def.price).match(/[\d.]+/g);
-              if (matches && matches.length) {
-                prices.push(
-                  ...matches
-                    .map((x) => Number(x))
-                    .filter((v) => !Number.isNaN(v))
-                );
-              }
-            }
-
-            if (prices.length) {
-              price = Math.max(...prices);
-            }
+          if (!prices.length && item.sku.def?.price) {
+            const matches = String(item.sku.def.price).match(/[\d.]+/g);
+            if (matches)
+              prices.push(...matches.map((x) => Number(x)).filter((v) => !isNaN(v)));
           }
-        } else {
-          // Alibaba: از priceModule.priceList، بیشترین قیمت
-          if (
-            item.sku &&
-            item.sku.def &&
-            item.sku.def.priceModule &&
-            Array.isArray(item.sku.def.priceModule.priceList) &&
-            item.sku.def.priceModule.priceList.length > 0
-          ) {
-            const priceModule = item.sku.def.priceModule;
-            const priceList = priceModule.priceList || [];
 
-            const prices = priceList
-              .map((p) => Number(p.price))
-              .filter((v) => !Number.isNaN(v));
+          if (prices.length) price = Math.max(...prices);
+        }
+      } else {
+        if (
+          item.sku?.def?.priceModule?.priceList &&
+          Array.isArray(item.sku.def.priceModule.priceList)
+        ) {
+          const prices = item.sku.def.priceModule.priceList
+            .map((p) => Number(p.price))
+            .filter((v) => !isNaN(v));
+          if (prices.length) price = Math.max(...prices);
 
-            if (prices.length) {
-              price = Math.max(...prices);
-            }
-
-            if (priceModule.currencyCode) {
-              currency =
-                priceModule.currencyCode === "$"
-                  ? "USD"
-                  : priceModule.currencyCode;
-            }
+          if (item.sku.def.priceModule.currencyCode) {
+            currency =
+              item.sku.def.priceModule.currencyCode === "$"
+                ? "USD"
+                : item.sku.def.priceModule.currencyCode;
           }
         }
-
-        // لاگ قبل از تبدیل به تومن
-        console.log("Price before conversion:", {
-          platform,
-          price,
-          currency,
-        });
-
-        // --- تبدیل به تومن با نرخ واقعی ---
-        let localPriceToman = 0;
-        let rateUsed = null;
-
-        if (currency === "USD" && rates.usdToToman) {
-          rateUsed = rates.usdToToman;
-          localPriceToman = Math.round(price * rates.usdToToman);
-        } else if (currency === "CNY" && rates.cnyToToman) {
-          rateUsed = rates.cnyToToman;
-          localPriceToman = Math.round(price * rates.cnyToToman);
-        } else {
-          localPriceToman = 0;
-        }
-
-        console.log("Local price (toman) calculated:", {
-          platform,
-          price,
-          currency,
-          rateUsed,
-          localPriceToman,
-        });
-
-        output.innerHTML = `
-          <div class="product">
-            <div>
-              ${
-                image
-                  ? `<img src="${image}" alt="image" />`
-                  : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">بدون تصویر</div>`
-              }
-            </div>
-            <div class="product-details">
-              <p><span class="label">عنوان محصول:</span><br>${title}</p>
-              <p><span class="label">قیمت (بیشترین قیمت پلکانی):</span><br>${price} ${currency}</p>
-              <p><span class="label">قیمت تقریبی (تومان):</span><br>${
-                localPriceToman
-                  ? localPriceToman.toLocaleString("fa-IR") + " تومان"
-                  : "نامشخص"
-              }</p>
-              <p class="note" style="margin-top:8px;font-size:11px;">
-                نرخ تبدیل بر اساس سرویس <code>/api/rates</code> است و ممکن است با نرخ بازار آزاد متفاوت باشد.
-              </p>
-            </div>
-          </div>
-          <hr>
-          <div class="note">
-            <strong>Raw API Response (برای دیباگ):</strong>
-            <pre>${JSON.stringify(json.data, null, 2)}</pre>
-          </div>
-        `;
-      } catch (e) {
-        console.error(e);
-        output.innerHTML =
-          "<div class='error'>خطا در ارتباط: " +
-          e.message +
-          "</div>";
       }
-    });
+
+      console.log("Final product price:", { platform, price, currency });
+
+      output.innerHTML = `
+        <div class="product">
+          <div>
+            ${
+              image
+                ? `<img src="${image}" alt="image" />`
+                : `<div style="width:220px;height:220px;background:#eee;display:flex;align-items:center;justify-content:center;color:#777;border-radius:6px;">بدون تصویر</div>`
+            }
+          </div>
+          <div class="product-details">
+            <p><span class="label">عنوان محصول:</span><br>${title}</p>
+            <p><span class="label">قیمت (بیشترین قیمت پلکانی):</span><br>${price} ${currency}</p>
+          </div>
+        </div>
+        <hr>
+        <div class="note">
+          <strong>Raw API Response (برای دیباگ):</strong>
+          <pre>${JSON.stringify(json.data, null, 2)}</pre>
+        </div>
+      `;
+    } catch (err) {
+      console.error(err);
+      output.innerHTML = `<div class='error'>خطا در دریافت داده: ${err.message}</div>`;
+    }
+  });
 </script>
+
 
 
 
