@@ -217,22 +217,47 @@
           item.itemTitle ||
           "عنوان نامشخص";
 
-        let price = 0;
-        let currency = settings.currency || "USD";
+// قیمت و ارز
+let price = 0;
+let currency = settings.currency || (platform === "1688" ? "CNY" : "USD");
 
-        if (
-          item.sku &&
-          item.sku.def &&
-          item.sku.def.priceModule &&
-          Array.isArray(item.sku.def.priceModule.priceList) &&
-          item.sku.def.priceModule.priceList.length > 0
-        ) {
-          const priceModule = item.sku.def.priceModule;
-          price = Number(priceModule.priceList[0].price) || 0;
-          if (priceModule.currencyCode && priceModule.currencyCode !== "$") {
-            currency = priceModule.currencyCode;
-          }
-        }
+if (platform === "1688") {
+  // ---------- منطق 1688 ----------
+  if (item.sku) {
+    const saleInfo = item.sku.saleInfo || {};
+
+    // اول از promotionPrice (یا skuRangePrice) استفاده می‌کنیم
+    if (Array.isArray(saleInfo.promotionPrice) && saleInfo.promotionPrice.length > 0) {
+      price = Number(saleInfo.promotionPrice[0].price) || 0;
+    } else if (Array.isArray(saleInfo.skuRangePrice) && saleInfo.skuRangePrice.length > 0) {
+      price = Number(saleInfo.skuRangePrice[0].price) || 0;
+    }
+
+    // اگر هنوز ۰ بود، از def.price مثل "65.49 - 319.68" عدد اول رو دربیار
+    if (!price && item.sku.def && item.sku.def.price) {
+      const match = String(item.sku.def.price).match(/[\d.]+/);
+      if (match) {
+        price = Number(match[0]) || 0;
+      }
+    }
+  }
+} else {
+  // ---------- منطق Alibaba (مثل قبل) ----------
+  if (
+    item.sku &&
+    item.sku.def &&
+    item.sku.def.priceModule &&
+    Array.isArray(item.sku.def.priceModule.priceList) &&
+    item.sku.def.priceModule.priceList.length > 0
+  ) {
+    const priceModule = item.sku.def.priceModule;
+    price = Number(priceModule.priceList[0].price) || 0;
+    if (priceModule.currencyCode && priceModule.currencyCode !== "$") {
+      currency = priceModule.currencyCode;
+    }
+  }
+}
+
 
         let image = "";
         if (Array.isArray(item.images) && item.images.length > 0) {
