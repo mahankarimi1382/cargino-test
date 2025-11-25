@@ -171,21 +171,25 @@
 
   // --- نرخ ارز از بک‌اند (/api/rates) ---
 
-  let cachedRates = null;
+let cachedRates = null;
 
-  async function ensureFxRates() {
-    if (cachedRates) return cachedRates;
+async function ensureFxRates() {
+  if (cachedRates) return cachedRates;
 
-    const res = await fetch("/api/rates");
-    const json = await res.json();
+  const res = await fetch("/api/rates");
+  const json = await res.json();
 
-    if (!json.success) {
-      throw new Error(json.error || "خطا در دریافت نرخ ارز");
-    }
+  // 👇 اینجا نرخ‌هایی که از بک‌اند گرفتی رو تو کنسول ببین
+  console.log("FX /api/rates response:", json);
 
-    cachedRates = json; // {usdToToman, cnyToToman, ...}
-    return json;
+  if (!json.success) {
+    throw new Error(json.error || "خطا در دریافت نرخ ارز");
   }
+
+  cachedRates = json; // {usdToToman, cnyToToman, ...}
+  return json;
+}
+
 
   // --- رویداد روی دکمه ---
 
