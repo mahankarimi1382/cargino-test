@@ -1,72 +1,56 @@
 // api/product.js
-// این فایل یک Serverless Function برای Vercel است
 
 export default async function handler(req, res) {
-  if (req.method !== "GET" && req.method !== "POST") {
-    return res.status(405).json({ success: false, error: "Method not allowed" });
+  // فقط GET قبول کنیم (کافیه برای تست)
+  if (req.method !== "GET") {
+    return res.status(405).json({ success: false, error: "Only GET allowed" });
   }
 
-  // itemId را از querystring (GET) یا body (POST) می‌خوانیم
-  let itemId = req.query.itemId;
-  if (!itemId && req.body) {
-    try {
-      const body =
-        typeof req.body === "string" ? JSON.parse(req.body) : req.body;
-      itemId = body.itemId;
-    } catch (e) {
-      // اگر body JSON نباشد
-    }
-  }
+  const itemId = req.query.itemId;
 
   if (!itemId) {
     return res
       .status(400)
-      .json({ success: false, error: "itemId parameter is required" });
+      .json({ success: false, error: "itemId query parameter is required" });
   }
 
-  // ⚠️ اینجا URL نهایی API را می‌سازیم.
-  // برای مثال:
-  // https://alibaba-datahub.p.rapidapi.com/item_detail?itemId=...
-  const baseUrl = process.env.EXTERNAL_API_BASE_URL; // مثلاً: https://alibaba-datahub.p.rapidapi.com
-  const path = process.env.EXTERNAL_API_PATH || "/item_detail"; // مثلاً: /item_detail
+  const host = process.env.RAPIDAPI_HOST || "alibaba-datahub.p.rapidapi.com";
+  const apiKey = process.env.RAPIDAPI_KEY;
 
-  if (!baseUrl) {
+  if (!apiKey) {
     return res.status(500).json({
       success: false,
-      error:
-        "EXTERNAL_API_BASE_URL is not set in environment variables on the server.",
+      error: "RAPIDAPI_KEY is not set in environment variables",
     });
   }
 
-  const url = `${baseUrl}${path}?itemId=${encodeURIComponent(itemId)}`;
+  // آدرس همون اندپوینت item_detail روی RapidAPI
+  const url = `https://${host}/item_detail?itemId=${encodeURIComponent(itemId)}`;
 
   try {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        // این هدرها را طبق مستندات سرویس واقعی تنظیم کن
-        // مثال برای سرویسی مثل RapidAPI:
-        // 'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-        // 'x-rapidapi-host': process.env.RAPIDAPI_HOST,
-        "X-Api-Key": process.env.EXTERNAL_API_KEY || "",
-        "X-Api-Host": process.env.EXTERNAL_API_HOST || "",
+        "x-rapidapi-key": apiKey,
+        "x-rapidapi-host": host,
       },
     });
 
-    const data = await response.json().catch(() => null);
-    const rawText = !data ? await response.text() : null;
+    const data = await response.json().catch(async () => {
+      const text = await response.text();
+      return { rawText: text };
+    });
 
-    // هر statusCode غیر از 200 را هم به فرانت پاس می‌دهیم
     return res.status(response.status).json({
       success: response.ok,
       status: response.status,
-      data: data || rawText,
+      data,
     });
   } catch (err) {
-    console.error("Error calling external API:", err);
+    console.error("Error calling RapidAPI:", err);
     return res.status(500).json({
       success: false,
-      error: "Internal error calling external API",
+      error: "Internal error calling RapidAPI",
       details: err.message,
     });
   }
